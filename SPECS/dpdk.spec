@@ -9,7 +9,7 @@
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
 %define ver 22.11
-%define rel 3
+%define rel 4
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
 
@@ -30,6 +30,8 @@ Source: http://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
+
+Patch1: 0001-net-i40e-revert-link-status-check-on-device-start.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -291,6 +293,9 @@ rm -rf %{docdir}/html/.doctrees
 %endif
 
 %changelog
+* Tue Apr 11 2023 David Marchand <david.marchand@redhat.com> - 22.11-4
+- Fix MTU regression for net/i40e (#2182799)
+
 * Thu Mar 23 2023 Timothy Redaelli <tredaelli@redhat.com> - 22.11-3
 - Add support to load compressed firmware (#2179024)
 
