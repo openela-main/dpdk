@@ -8,8 +8,8 @@
 #% define date 20191128
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
-%define ver 22.11
-%define rel 4
+%define ver 23.11
+%define rel 1
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
 
@@ -23,15 +23,13 @@ Epoch: 2
 %endif
 URL: http://dpdk.org
 %if 0%{?commit0:1}
-Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{commit0}.tar.xz
+Source: https://dpdk.org/browse/dpdk/snapshot/dpdk-%{commit0}.tar.xz
 %else
-Source: http://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
+Source: https://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 %endif
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
-
-Patch1: 0001-net-i40e-revert-link-status-check-on-device-start.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -153,11 +151,11 @@ ENABLED_DRIVERS+=(
     bus/vmbus
     common/iavf
     common/mlx5
+    common/nfp
     net/bnxt
     net/enic
     net/iavf
     net/ice
-    net/mlx4
     net/mlx5
     net/netvsc
     net/nfp
@@ -177,48 +175,40 @@ for driver in "${ENABLED_DRIVERS[@]}"; do
     enable_drivers="${enable_drivers:+$enable_drivers,}"$driver
 done
 
-# As of 22.11, following libraries can be disabled:
-# optional_libs = [
-#         'bitratestats',
-#         'cfgfile',
-#         'flow_classify',
-#         'gpudev',
-#         'gro',
-#         'gso',
-#         'kni',
-#         'jobstats',
-#         'latencystats',
-#         'metrics',
-#         'node',
-#         'pdump',
-#         'pipeline',
-#         'port',
-#         'power',
-#         'table',
-#         'vhost',
-# ]
 # If doing any updates, this must be aligned with:
 # https://access.redhat.com/articles/3538141
-DISABLED_LIBS=(
-    cfgfile
-    flow_classify
-    gpudev
-    kni
-    jobstats
-    node
-    pipeline
-    port
-    power
-    table
+ENABLED_LIBS=(
+    bbdev
+    bitratestats
+    bpf
+    cmdline
+    cryptodev
+    dmadev
+    gro
+    gso
+    hash
+    ip_frag
+    latencystats
+    member
+    meter
+    metrics
+    pcapng
+    pdump
+    security
+    stack
+    vhost
 )
 
-for lib in "${DISABLED_LIBS[@]}"; do
-    disable_libs="${disable_libs:+$disable_libs,}"$lib
+for lib in "${ENABLED_LIBS[@]}"; do
+    enable_libs="${enable_libs:+$enable_libs,}"$lib
 done
 
+ln -s /usr/bin/true mandb
+export PATH=$(pwd):$PATH
 %meson --includedir=include/dpdk \
        --default-library=shared \
-       -Ddisable_libs="$disable_libs" \
+       -Ddeveloper_mode=disabled \
+       -Denable_libs="$enable_libs" \
        -Ddrivers_install_subdir=dpdk-pmds \
        -Denable_apps="$enable_apps" \
        -Denable_docs=true \
@@ -235,10 +225,10 @@ for driver in "${ENABLED_DRIVERS[@]}"; do
 	echo "!!! Could not find $driver in rte_build_config.h, please check dependencies. !!!"
 	false
 done
-for lib in "${DISABLED_LIBS[@]}"; do
+for lib in "${ENABLED_LIBS[@]}"; do
 	config_token="RTE_LIB_$(echo "$lib" | tr [a-z/] [A-Z_])"
-	grep -Fqw "$config_token" */rte_build_config.h || continue
-	echo "!!! Found $lib in rte_build_config.h. !!!"
+	! grep -Fqw "$config_token" */rte_build_config.h || continue
+	echo "!!! Could not find $lib in rte_build_config.h, please check dependencies. !!!"
 	false
 done
 %meson_build
@@ -248,9 +238,10 @@ done
 
 rm -f %{buildroot}%{_libdir}/*.a
 # Taken from debian/rules
-rm -f %{docdir}/html/.buildinfo
-rm -f %{docdir}/html/objects.inv
-rm -rf %{docdir}/html/.doctrees
+rm -f %{buildroot}%{docdir}/html/.buildinfo
+rm -f %{buildroot}%{docdir}/html/objects.inv
+rm -rf %{buildroot}%{docdir}/html/.doctrees
+find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 
 %files
 # BSD
@@ -281,6 +272,7 @@ rm -rf %{docdir}/html/.doctrees
 %{pmddir}/*.so
 %{_libdir}/pkgconfig/libdpdk.pc
 %{_libdir}/pkgconfig/libdpdk-libs.pc
+%{_datadir}/man
 %if %{with examples}
 %files examples
 %{_bindir}/dpdk-*
@@ -293,6 +285,9 @@ rm -rf %{docdir}/html/.doctrees
 %endif
 
 %changelog
+* Fri Dec 15 2023 David Marchand <david.marchand@redhat.com> - 23.11-1
+- Rebase to 23.11 (RHEL-19571)
+
 * Tue Apr 11 2023 David Marchand <david.marchand@redhat.com> - 22.11-4
 - Fix MTU regression for net/i40e (#2182799)
 
