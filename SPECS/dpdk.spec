@@ -8,27 +8,28 @@
 #% define date 20191128
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
-%define ver 21.11
-%define rel 3
+%define ver 23.11
+%define rel 1
 
-%define srcname dpdk
+%define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
+
+%define pyelftoolsver 0.27
 
 Name: dpdk
 Version: %{ver}
 Release: %{rel}%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+%if 0%{?fedora} || 0%{?rhel} > 8
+Epoch: 2
+%endif
 URL: http://dpdk.org
 %if 0%{?commit0:1}
-Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{commit0}.tar.xz
+Source: https://dpdk.org/browse/dpdk/snapshot/dpdk-%{commit0}.tar.xz
 %else
-Source: http://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
+Source: https://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 %endif
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
-
-# CVE-2022-2132
-Patch1: 0001-vhost-discard-too-small-descriptor-chains.patch
-Patch2: 0002-vhost-fix-header-spanned-across-more-than-two-descri.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -57,81 +58,14 @@ Conflicts: dpdk-doc < 18.11-2
 %endif
 
 BuildRequires: meson
-%if 0%{?rhel} && 0%{?rhel} < 9
-%define pyelftoolsver 0.27
 Source1: https://github.com/eliben/pyelftools/archive/refs/tags/v%{pyelftoolsver}.tar.gz#/pyelftools-%{pyelftoolsver}.tar.gz
-%else
+%if 0%{?rhel} > 8 || 0%{?fedora}
 BuildRequires: python3-pyelftools
 %endif
-BuildRequires: gcc, zlib-devel, numactl-devel
+BuildRequires: gcc, zlib-devel, numactl-devel, libarchive-devel
 BuildRequires: doxygen, python3-sphinx
 %ifarch x86_64
 BuildRequires: rdma-core-devel >= 15
-%endif
-
-# Macros taked from ninja-build and meson packages and adapted to be defined here
-# See /usr/lib/rpm/macros.d/macros.{ninja,meson}
-%if 0%{?rhel} && 0%{?rhel} < 8
-
-# RHEL-7 doesn't define _vpath_* macros yet
-%if 0%{!?_vpath_srcdir:1}
-%define _vpath_srcdir .
-%endif
-%if 0%{!?_vpath_builddir:1}
-%define _vpath_builddir %_target_platform
-%endif
-
-%define __ninja %{venvdir}/bin/ninja
-%define __ninja_common_opts -v %{?_smp_mflags}
-
-%define ninja_build \
-    %{__ninja} %{__ninja_common_opts}
-
-%define ninja_install \
-    DESTDIR=%{buildroot} %{__ninja} install %{__ninja_common_opts}
-
-%define ninja_test \
-    %{__ninja} test %{__ninja_common_opts}
-
-%define __meson %{venvdir}/bin/meson
-%define __meson_wrap_mode nodownload
-%define __meson_auto_features enabled
-
-%define meson \
-    export CFLAGS="${CFLAGS:-%__global_cflags}"       \
-    export CXXFLAGS="${CXXFLAGS:-%__global_cxxflags}" \
-    export FFLAGS="${FFLAGS:-%__global_fflags}"       \
-    export FCFLAGS="${FCFLAGS:-%__global_fcflags}"    \
-    export LDFLAGS="${LDFLAGS:-%__global_ldflags}"    \
-    %{__meson}                                    \\\
-        --buildtype=plain                         \\\
-        --prefix=%{_prefix}                       \\\
-        --libdir=%{_libdir}                       \\\
-        --libexecdir=%{_libexecdir}               \\\
-        --bindir=%{_bindir}                       \\\
-        --sbindir=%{_sbindir}                     \\\
-        --includedir=%{_includedir}               \\\
-        --datadir=%{_datadir}                     \\\
-        --mandir=%{_mandir}                       \\\
-        --infodir=%{_infodir}                     \\\
-        --localedir=%{_datadir}/locale            \\\
-        --sysconfdir=%{_sysconfdir}               \\\
-        --localstatedir=%{_localstatedir}         \\\
-        --sharedstatedir=%{_sharedstatedir}       \\\
-        --wrap-mode=%{__meson_wrap_mode}          \\\
-        --auto-features=%{__meson_auto_features}  \\\
-        %{_vpath_srcdir} %{_vpath_builddir}       \\\
-        %{nil}
-
-%define meson_build \
-    %ninja_build -C %{_vpath_builddir}
-
-%define meson_install \
-    %ninja_install -C %{_vpath_builddir}
-
-%define meson_test \
-    %ninja_test -C %{_vpath_builddir}
-
 %endif
 
 %description
@@ -140,7 +74,7 @@ fast packet processing in the user space.
 
 %package devel
 Summary: Data Plane Development Kit development files
-Requires: %{name}%{?_isa} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
 %ifarch x86_64
 Requires: rdma-core-devel
 %endif
@@ -159,7 +93,7 @@ API programming documentation for the Data Plane Development Kit.
 %if %{with tools}
 %package tools
 Summary: Tools for setting up Data Plane Development Kit environment
-Requires: %{name} = %{version}-%{release}
+Requires: %{name} = %{?epoch:%{epoch}:}%{version}-%{release}
 Requires: kmod pciutils findutils iproute python3
 
 %description tools
@@ -189,6 +123,15 @@ as L2 and L3 forwarding.
 export PYTHONPATH=$(pwd)/pyelftools-%{pyelftoolsver}
 %endif
 
+ENABLED_APPS=(
+    test-pmd
+    test-bbdev
+)
+
+for app in "${ENABLED_APPS[@]}"; do
+    enable_apps="${enable_apps:+$enable_apps,}"$app
+done
+
 ENABLED_DRIVERS=(
     bus/pci
     bus/vdev
@@ -203,15 +146,16 @@ ENABLED_DRIVERS=(
 
 %ifarch x86_64
 ENABLED_DRIVERS+=(
+    baseband/acc
     bus/auxiliary
     bus/vmbus
     common/iavf
     common/mlx5
+    common/nfp
     net/bnxt
     net/enic
     net/iavf
     net/ice
-    net/mlx4
     net/mlx5
     net/netvsc
     net/nfp
@@ -227,41 +171,46 @@ ENABLED_DRIVERS+=(
 )
 %endif
 
-for driver in ${ENABLED_DRIVERS[@]}; do
+for driver in "${ENABLED_DRIVERS[@]}"; do
     enable_drivers="${enable_drivers:+$enable_drivers,}"$driver
 done
 
-# As of 21.11-rc3, following libraries can be disabled:
-# optional_libs = [
-#         'bitratestats',
-#         'gpudev',
-#         'gro',
-#         'gso',
-#         'kni',
-#         'jobstats',
-#         'latencystats',
-#         'metrics',
-#         'pdump',
-#         'power',
-#         'vhost',
-# ]
 # If doing any updates, this must be aligned with:
 # https://access.redhat.com/articles/3538141
-DISABLED_LIBS=(
-    gpudev
-    kni
-    jobstats
-    power
+ENABLED_LIBS=(
+    bbdev
+    bitratestats
+    bpf
+    cmdline
+    cryptodev
+    dmadev
+    gro
+    gso
+    hash
+    ip_frag
+    latencystats
+    member
+    meter
+    metrics
+    pcapng
+    pdump
+    security
+    stack
+    vhost
 )
 
-for lib in "${DISABLED_LIBS[@]}"; do
-    disable_libs="${disable_libs:+$disable_libs,}"$lib
+for lib in "${ENABLED_LIBS[@]}"; do
+    enable_libs="${enable_libs:+$enable_libs,}"$lib
 done
 
+ln -s /usr/bin/true mandb
+export PATH=$(pwd):$PATH
 %meson --includedir=include/dpdk \
        --default-library=shared \
-       -Ddisable_libs="$disable_libs" \
+       -Ddeveloper_mode=disabled \
+       -Denable_libs="$enable_libs" \
        -Ddrivers_install_subdir=dpdk-pmds \
+       -Denable_apps="$enable_apps" \
        -Denable_docs=true \
        -Denable_drivers="$enable_drivers" \
        -Dplatform=generic \
@@ -271,40 +220,34 @@ done
 
 # Check drivers and libraries
 for driver in "${ENABLED_DRIVERS[@]}"; do
-	config_token=RTE_$(echo $driver | tr [a-z/] [A-Z_])
-	! grep -q $config_token */rte_build_config.h || continue
+	config_token="RTE_$(echo "$driver" | tr [a-z/] [A-Z_])"
+	! grep -Fqw "$config_token" */rte_build_config.h || continue
 	echo "!!! Could not find $driver in rte_build_config.h, please check dependencies. !!!"
 	false
 done
-for lib in "${DISABLED_LIBS[@]}"; do
-	config_token=RTE_LIB_$(echo $lib | tr [a-z/] [A-Z_])
-	grep -q $config_token */rte_build_config.h || continue
-	echo "!!! Found $lib in rte_build_config.h. !!!"
+for lib in "${ENABLED_LIBS[@]}"; do
+	config_token="RTE_LIB_$(echo "$lib" | tr [a-z/] [A-Z_])"
+	! grep -Fqw "$config_token" */rte_build_config.h || continue
+	echo "!!! Could not find $lib in rte_build_config.h, please check dependencies. !!!"
 	false
 done
 %meson_build
 
 %install
-%if 0%{?rhel} && 0%{?rhel} < 8
-export PATH="%{venvdir}/bin:$PATH"
-%endif
-
 %meson_install
 
-rm -f %{buildroot}%{_bindir}/dpdk-dumpcap
-rm -f %{buildroot}%{_bindir}/dpdk-pdump
-rm -f %{buildroot}%{_bindir}/dpdk-proc-info
-rm -f %{buildroot}%{_bindir}/dpdk-test{,-acl,-bbdev,-cmdline,-compress-perf,-crypto-perf,-eventdev,-pipeline,-sad,-fib,-flow-perf,-regex}
 rm -f %{buildroot}%{_libdir}/*.a
-# Taked from debian/rules
-rm -f %{docdir}/html/.buildinfo
-rm -f %{docdir}/html/objects.inv
-rm -rf %{docdir}/html/.doctrees
+# Taken from debian/rules
+rm -f %{buildroot}%{docdir}/html/.buildinfo
+rm -f %{buildroot}%{docdir}/html/objects.inv
+rm -rf %{buildroot}%{docdir}/html/.doctrees
+find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 
 %files
 # BSD
 %doc README MAINTAINERS
 %{_bindir}/dpdk-testpmd
+%{_bindir}/dpdk-test-bbdev
 %dir %{pmddir}
 %{_libdir}/*.so.*
 %{pmddir}/*.so.*
@@ -329,6 +272,7 @@ rm -rf %{docdir}/html/.doctrees
 %{pmddir}/*.so
 %{_libdir}/pkgconfig/libdpdk.pc
 %{_libdir}/pkgconfig/libdpdk-libs.pc
+%{_datadir}/man
 %if %{with examples}
 %files examples
 %{_bindir}/dpdk-*
@@ -341,6 +285,9 @@ rm -rf %{docdir}/html/.doctrees
 %endif
 
 %changelog
+* Fri Dec 15 2023 David Marchand <david.marchand@redhat.com> - 23.11-1
+- Rebase to 23.11 (RHEL-19584)
+
 * Fri Dec 23 2022 Timothy Redaelli <tredaelli@redhat.com> - 21.11-3
 - Version bump just to be sure it's updated from dpdk-21.11-2.el8_7
 
