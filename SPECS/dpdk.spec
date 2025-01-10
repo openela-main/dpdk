@@ -9,7 +9,7 @@
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
 %define ver 23.11
-%define rel 1
+%define rel 2
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
 
@@ -30,6 +30,9 @@ Source: https://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
+
+# CVE-2024-11614
+Patch1: 0001-net-virtio-fix-Rx-checksum-calculation.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -285,6 +288,9 @@ find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 %endif
 
 %changelog
+* Tue Dec 17 2024 Kevin Traynor <ktraynor@redhat.com> - 23.11-2
+- Backport fixes for CVE-2024-11614 (RHEL-68600)
+
 * Fri Dec 15 2023 David Marchand <david.marchand@redhat.com> - 23.11-1
 - Rebase to 23.11 (RHEL-19584)
 
