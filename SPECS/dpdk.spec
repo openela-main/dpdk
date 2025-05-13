@@ -8,7 +8,7 @@
 #% define date 20191128
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
-%define ver 23.11
+%define ver 24.11.1
 %define rel 2
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
@@ -30,9 +30,6 @@ Source: https://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
-
-# CVE-2024-11614
-Patch1: 0001-net-virtio-fix-Rx-checksum-calculation.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -68,7 +65,7 @@ BuildRequires: python3-pyelftools
 BuildRequires: gcc, zlib-devel, numactl-devel, libarchive-devel
 BuildRequires: doxygen, python3-sphinx
 %ifarch x86_64
-BuildRequires: rdma-core-devel >= 15
+BuildRequires: rdma-core-devel >= 44
 %endif
 
 %description
@@ -156,9 +153,11 @@ ENABLED_DRIVERS+=(
     common/mlx5
     common/nfp
     net/bnxt
+    net/ena
     net/enic
     net/iavf
     net/ice
+    net/mana
     net/mlx5
     net/netvsc
     net/nfp
@@ -199,6 +198,7 @@ ENABLED_LIBS=(
     pdump
     security
     stack
+    timer
     vhost
 )
 
@@ -288,8 +288,14 @@ find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 %endif
 
 %changelog
+* Mon Jan 13 2025 David Marchand <david.marchand@redhat.com> - 24.11.1-2
+- Enable net/ena and net/mana drivers (RHEL-23843)
+
+* Wed Dec 18 2024 David Marchand <david.marchand@redhat.com> - 24.11.1-1
+- Rebase to 24.11.1 (RHEL-71133)
+
 * Tue Dec 17 2024 Kevin Traynor <ktraynor@redhat.com> - 23.11-2
-- Backport fixes for CVE-2024-11614 (RHEL-68601)
+- Backport fixes for CVE-2024-11614 (RHEL-68605)
 
 * Fri Dec 15 2023 David Marchand <david.marchand@redhat.com> - 23.11-1
 - Rebase to 23.11 (RHEL-19571)
