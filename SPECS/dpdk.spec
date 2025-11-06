@@ -8,8 +8,8 @@
 #% define date 20191128
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
-%define ver 24.11.1
-%define rel 2
+%define ver 24.11.2
+%define rel 3
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
 
@@ -30,6 +30,8 @@ Source: https://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
+
+Patch1: 0001-net-mlx5-avoid-setting-kernel-MTU-if-not-needed.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -64,7 +66,7 @@ BuildRequires: python3-pyelftools
 %endif
 BuildRequires: gcc, zlib-devel, numactl-devel, libarchive-devel
 BuildRequires: doxygen, python3-sphinx
-%ifarch x86_64
+%ifarch aarch64 x86_64
 BuildRequires: rdma-core-devel >= 44
 %endif
 
@@ -147,10 +149,8 @@ ENABLED_DRIVERS=(
 %ifarch x86_64
 ENABLED_DRIVERS+=(
     baseband/acc
-    bus/auxiliary
     bus/vmbus
     common/iavf
-    common/mlx5
     common/nfp
     net/bnxt
     net/ena
@@ -158,7 +158,6 @@ ENABLED_DRIVERS+=(
     net/iavf
     net/ice
     net/mana
-    net/mlx5
     net/netvsc
     net/nfp
     net/qede
@@ -168,8 +167,11 @@ ENABLED_DRIVERS+=(
 
 %ifarch aarch64 x86_64
 ENABLED_DRIVERS+=(
+    bus/auxiliary
+    common/mlx5
     net/e1000
     net/ixgbe
+    net/mlx5
 )
 %endif
 
@@ -288,6 +290,15 @@ find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 %endif
 
 %changelog
+* Tue Aug 19 2025 David Marchand <david.marchand@redhat.com> - 24.11.2-3
+- Enable net/mlx5 driver for ARM (RHEL-109899)
+
+* Thu Jun 26 2025 Maxime Coquelin <maxime.coquelin@redhat.com> - 24.11.2-2
+- Avoid requiring NET_ADMIN with mlx5 (RHEL-101602)
+
+* Mon Jun 23 2025 Kevin Traynor <ktraynor@redhat.com> - 24.11.2-1
+- Rebase to 24.11.2 (RHEL-96848)
+
 * Mon Jan 13 2025 David Marchand <david.marchand@redhat.com> - 24.11.1-2
 - Enable net/ena and net/mana drivers (RHEL-23843)
 
