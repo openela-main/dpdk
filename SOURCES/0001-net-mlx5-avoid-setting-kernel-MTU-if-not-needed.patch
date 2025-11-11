@@ -1,0 +1,43 @@
+From f1f9113a08b202d302ba9448d351c04da48ff46d Mon Sep 17 00:00:00 2001
+From: Maxime Coquelin <maxime.coquelin@redhat.com>
+Date: Wed, 28 May 2025 11:36:44 +0200
+Subject: [PATCH] net/mlx5: avoid setting kernel MTU if not needed
+
+This patch checks whether the Kernel MTU has the same value
+as the requested one at port configuration time, and skip
+setting it if it is the same.
+
+Doing this, we can avoid the application to require
+NET_ADMIN capability, as in v23.11.
+
+Fixes: 10859ecf09c4 ("net/mlx5: fix MTU configuration")
+Cc: stable@dpdk.org
+
+Signed-off-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+Acked-by: Dariusz Sosnowski <dsosnowski@nvidia.com>
+---
+ drivers/net/mlx5/mlx5_ethdev.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/net/mlx5/mlx5_ethdev.c b/drivers/net/mlx5/mlx5_ethdev.c
+index a50320075c..b7df39ace9 100644
+--- a/drivers/net/mlx5/mlx5_ethdev.c
++++ b/drivers/net/mlx5/mlx5_ethdev.c
+@@ -678,6 +678,14 @@ mlx5_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
+ 	ret = mlx5_get_mtu(dev, &kern_mtu);
+ 	if (ret)
+ 		return ret;
++
++	if (kern_mtu == mtu) {
++		priv->mtu = mtu;
++		DRV_LOG(DEBUG, "port %u adapter MTU was already set to %u",
++			dev->data->port_id, mtu);
++		return 0;
++	}
++
+ 	/* Set kernel interface MTU first. */
+ 	ret = mlx5_set_mtu(dev, mtu);
+ 	if (ret)
+-- 
+2.49.0
+
