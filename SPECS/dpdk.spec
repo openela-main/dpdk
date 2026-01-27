@@ -8,8 +8,8 @@
 #% define date 20191128
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
-%define ver 24.11.2
-%define rel 3
+%define ver 24.11.3
+%define rel 1
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
 
@@ -30,8 +30,6 @@ Source: https://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
-
-Patch1: 0001-net-mlx5-avoid-setting-kernel-MTU-if-not-needed.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -290,11 +288,14 @@ find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 %endif
 
 %changelog
+* Fri Oct 17 2025 Kevin Traynor <ktraynor@redhat.com> - 24.11.3-1
+- Rebase to 24.11.3 (RHEL-121231)
+
 * Tue Aug 19 2025 David Marchand <david.marchand@redhat.com> - 24.11.2-3
-- Enable net/mlx5 driver for ARM (RHEL-109899)
+- Enable net/mlx5 driver for ARM (RHEL-109612)
 
 * Thu Jun 26 2025 Maxime Coquelin <maxime.coquelin@redhat.com> - 24.11.2-2
-- Avoid requiring NET_ADMIN with mlx5 (RHEL-101602)
+- Avoid requiring NET_ADMIN with mlx5 (RHEL-93856)
 
 * Mon Jun 23 2025 Kevin Traynor <ktraynor@redhat.com> - 24.11.2-1
 - Rebase to 24.11.2 (RHEL-96848)
