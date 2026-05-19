@@ -8,7 +8,7 @@
 #% define date 20191128
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
-%define ver 24.11.3
+%define ver 25.11
 %define rel 1
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
@@ -148,7 +148,6 @@ ENABLED_DRIVERS=(
 ENABLED_DRIVERS+=(
     baseband/acc
     bus/vmbus
-    common/iavf
     common/nfp
     net/bnxt
     net/ena
@@ -288,8 +287,11 @@ find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 %endif
 
 %changelog
-* Fri Oct 17 2025 Kevin Traynor <ktraynor@redhat.com> - 24.11.3-1
-- Rebase to 24.11.3 (RHEL-121231)
+* Fri Jan 30 2026 Kevin Traynor <ktraynor@redhat.com> - 25.11-1
+- Rebase to 25.11 (RHEL-132461)
+
+* Tue Oct 14 2025 Kevin Traynor <ktraynor@redhat.com> - 24.11.3-1
+- Rebase to 24.11.3 (RHEL-121229)
 
 * Tue Aug 19 2025 David Marchand <david.marchand@redhat.com> - 24.11.2-3
 - Enable net/mlx5 driver for ARM (RHEL-109612)
