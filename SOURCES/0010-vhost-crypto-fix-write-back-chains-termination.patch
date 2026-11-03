@@ -1,0 +1,98 @@
+From 1ef44b4b496182db04de02e6ac80dcef01b2cada Mon Sep 17 00:00:00 2001
+From: David Marchand <david.marchand@redhat.com>
+Date: Wed, 26 Aug 2026 18:36:24 +0200
+Subject: [PATCH 10/14] vhost/crypto: fix write back chains termination
+
+Early failures (like a mempool depletion) while building a write back
+chain can result in unfinished chains since the ->next field is not
+explicitly set to NULL on allocation.
+
+Such an unterminated chain results in an infinite loop and double free
+issues.
+
+CVE-2026-86847
+Bugzilla ID: 2023
+
+Fixes: cd1e8f03abf0 ("vhost/crypto: fix packet copy in chaining mode")
+
+Acked-by: Bruce Richardson <bruce.richardson@intel.com>
+Signed-off-by: David Marchand <david.marchand@redhat.com>
+---
+ lib/vhost/vhost_crypto.c | 26 ++++++++++++++++++--------
+ 1 file changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/lib/vhost/vhost_crypto.c b/lib/vhost/vhost_crypto.c
+index a072324083..38a7bd75d6 100644
+--- a/lib/vhost/vhost_crypto.c
++++ b/lib/vhost/vhost_crypto.c
+@@ -860,4 +860,13 @@ copy_data(void *data, struct virtio_net *dev, struct vhost_virtqueue *vq,
+ }
+ 
++static void
++init_wb_data(struct rte_mempool *mp __rte_unused, void *opaque __rte_unused,
++		void *obj, unsigned int obj_idx __rte_unused)
++{
++	struct vhost_crypto_writeback_data *wb_data = obj;
++
++	wb_data->next = NULL;
++}
++
+ static void
+ write_back_data(struct vhost_crypto_data_req *vc_req)
+@@ -870,4 +879,6 @@ write_back_data(struct vhost_crypto_data_req *vc_req)
+ 		wb_last = wb_data;
+ 		wb_data = wb_data->next;
++
++		wb_last->next = NULL;
+ 		rte_mempool_put(vc_req->wb_pool, wb_last);
+ 	}
+@@ -878,7 +889,8 @@ free_wb_data(struct vhost_crypto_writeback_data *wb_data,
+ 		struct rte_mempool *mp)
+ {
+-	while (wb_data->next != NULL)
++	if (wb_data->next != NULL)
+ 		free_wb_data(wb_data->next, mp);
+ 
++	wb_data->next = NULL;
+ 	rte_mempool_put(mp, wb_data);
+ }
+@@ -921,5 +933,5 @@ prepare_write_back_data(struct vhost_virtqueue *vq,
+ 	__rte_requires_shared_capability(&vq->iotlb_lock)
+ {
+-	struct vhost_crypto_writeback_data *wb_data, *head;
++	struct vhost_crypto_writeback_data *wb_data, *head = NULL;
+ 	struct vhost_crypto_desc *desc = *cur_desc;
+ 	uint64_t dlen;
+@@ -960,6 +972,5 @@ prepare_write_back_data(struct vhost_virtqueue *vq,
+ 
+ 			wb_data = wb_data->next;
+-		} else
+-			wb_data->next = NULL;
++		}
+ 	} else
+ 		offset -= desc->len;
+@@ -1003,6 +1014,5 @@ prepare_write_back_data(struct vhost_virtqueue *vq,
+ 
+ 			wb_data = wb_data->next;
+-		} else
+-			wb_data->next = NULL;
++		}
+ 	}
+ 
+@@ -1852,5 +1862,5 @@ rte_vhost_crypto_create(int vid, uint8_t cryptodev_id,
+ 			VHOST_CRYPTO_MBUF_POOL_SIZE,
+ 			sizeof(struct vhost_crypto_writeback_data),
+-			128, 0, NULL, NULL, NULL, NULL,
++			128, 0, NULL, NULL, init_wb_data, NULL,
+ 			rte_socket_id(), 0);
+ 	if (!vcrypto->wb_pool) {
+@@ -1945,5 +1955,5 @@ rte_vhost_crypto_set_zero_copy(int vid, enum rte_vhost_crypto_zero_copy option)
+ 				VHOST_CRYPTO_MBUF_POOL_SIZE,
+ 				sizeof(struct vhost_crypto_writeback_data),
+-				128, 0, NULL, NULL, NULL, NULL,
++				128, 0, NULL, NULL, init_wb_data, NULL,
+ 				rte_socket_id(), 0);
+ 		if (!vcrypto->wb_pool) {
+-- 
+2.56.0
+

@@ -9,7 +9,7 @@
 #% define shortcommit0 %(c=%{commit0}; echo ${c:0:7})
 
 %define ver 25.11
-%define rel 1
+%define rel 2
 
 %define srcname dpdk%(awk -F. '{ if (NF > 2) print "-stable" }' <<<%{version})
 
@@ -30,6 +30,34 @@ Source: https://fast.dpdk.org/rel/dpdk-%{ver}.tar.xz
 
 # Only needed for creating snapshot tarballs, not used in build itself
 Source100: dpdk-snapshot.sh
+
+# CVE-2026-86846 CVE-2026-86848
+Patch1: 0001-vhost-crypto-fix-TOCTOU-OOB-write-in-finalize-path.patch
+# CVE-2026-86561
+Patch2: 0002-vhost-fix-missing-memory-size-validation-before-mmap.patch
+# CVE-2026-86562
+Patch3: 0003-vhost-fix-double-fetch-vulnerability-in-control-queu.patch
+Patch4: 0004-vhost-fix-out-of-bounds-read-in-control-virtqueue-ha.patch
+# CVE-2026-86563
+Patch5: 0005-vhost-fix-log-base-address-mapping-offset.patch
+# CVE-2026-86567
+Patch6: 0006-vhost-fix-VDUSE-stale-vring-pointers-after-IOTLB-inv.patch
+# CVE-2026-86566
+Patch7: 0007-vhost-fix-header-copy-to-multiple-descriptors.patch
+# CVE-2026-86849
+Patch8: 0008-vhost-crypto-catch-incorrect-request-length.patch
+# CVE-2026-86845
+Patch9: 0009-vhost-crypto-drop-crypto-session-cache.patch
+# CVE-2026-86847
+Patch10: 0010-vhost-crypto-fix-write-back-chains-termination.patch
+# CVE-2026-86856
+Patch11: 0011-vhost-check-number-of-queues-for-VDPA.patch
+# CVE-2026-86565
+Patch12: 0012-vhost-fix-inflight-descriptor-table-overflow.patch
+# CVE-2026-93683
+Patch13: 0013-vhost-fix-indirect-descriptor-table-double-fetch.patch
+# CVE-2026-100236
+Patch14: 0014-gso-fix-overflow-when-writing-to-very-small-buffers.patch
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -291,6 +319,12 @@ find %{buildroot}%{_datadir}/man/ -type f -a ! -iname "*rte_*" -exec rm {} \;
 %endif
 
 %changelog
+* Fri Oct 23 2026 Kevin Traynor <ktraynor@redhat.com> - 25.11-2
+- Backport fixes for CVE-2026-86846 CVE-2026-86848 CVE-2026-86561
+  CVE-2026-86562 CVE-2026-86563 CVE-2026-86567 CVE-2026-86566
+  CVE-2026-86849 CVE-2026-86845 CVE-2026-86847 CVE-2026-86856
+  CVE-2026-86565 CVE-2026-93683 CVE-2026-100236
+
 * Fri Jan 30 2026 Kevin Traynor <ktraynor@redhat.com> - 25.11-1
 - Rebase to 25.11 (RHEL-132460)
 

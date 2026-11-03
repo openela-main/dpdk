@@ -1,0 +1,74 @@
+From 83735c145bc91710408ea5e102b897800309fd51 Mon Sep 17 00:00:00 2001
+From: Maxime Coquelin <maxime.coquelin@redhat.com>
+Date: Fri, 11 Sep 2026 15:33:41 +0200
+Subject: [PATCH 04/14] vhost: fix out-of-bounds read in control virtqueue
+ handler
+
+Add request length validation before accessing command_data in the
+control virtqueue handler. The request buffer size was only validated
+against the 2-byte header (class + command), but the MQ_VQ_PAIRS_SET
+handler reads a 2-byte queue_pairs field from command_data without
+verifying those bytes exist.
+
+A malicious guest could submit a 2-byte control request causing an
+out-of-bounds heap read of bytes [2..3] beyond the allocation.
+
+Propagate data_len through virtio_net_ctrl_elem and validate the
+minimum required size (4 bytes) before dereferencing command_data.
+
+CVE-2026-86562
+Bugzilla ID: 2007
+
+Reported-by: Stephen Haruna <syberstevelabs@gmail.com>
+Acked-by: Kevin Traynor <ktraynor@redhat.com>
+Signed-off-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+---
+ lib/vhost/virtio_net_ctrl.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/lib/vhost/virtio_net_ctrl.c b/lib/vhost/virtio_net_ctrl.c
+index 4c860a4b33..c40df662e6 100644
+--- a/lib/vhost/virtio_net_ctrl.c
++++ b/lib/vhost/virtio_net_ctrl.c
+@@ -21,4 +21,5 @@ struct virtio_net_ctrl_elem {
+ 	uint16_t head_idx;
+ 	uint16_t n_descs;
++	uint32_t data_len;
+ 	uint8_t *desc_ack;
+ };
+@@ -129,4 +130,5 @@ virtio_net_ctrl_pop(struct virtio_net *dev, struct vhost_virtqueue *cvq,
+ 		goto err;
+ 	}
++	ctrl_elem->data_len = data_len;
+ 
+ 	ctrl_req = (uint8_t *)ctrl_elem->ctrl_req;
+@@ -196,5 +198,6 @@ virtio_net_ctrl_pop(struct virtio_net *dev, struct vhost_virtqueue *cvq,
+ 
+ static uint8_t
+-virtio_net_ctrl_handle_req(struct virtio_net *dev, struct virtio_net_ctrl *ctrl_req)
++virtio_net_ctrl_handle_req(struct virtio_net *dev, struct virtio_net_ctrl *ctrl_req,
++		uint32_t data_len)
+ {
+ 	uint8_t ret = VIRTIO_NET_ERR;
+@@ -205,4 +208,10 @@ virtio_net_ctrl_handle_req(struct virtio_net *dev, struct virtio_net_ctrl *ctrl_
+ 		uint32_t i;
+ 
++		if (data_len < sizeof(*ctrl_req) + sizeof(queue_pairs)) {
++			VHOST_CONFIG_LOG(dev->ifname, ERR,
++					"Invalid MQ control request size");
++			return VIRTIO_NET_ERR;
++		}
++
+ 		queue_pairs = *(uint16_t *)(uintptr_t)ctrl_req->command_data;
+ 		VHOST_CONFIG_LOG(dev->ifname, INFO, "Ctrl req: MQ %u queue pairs", queue_pairs);
+@@ -279,5 +288,6 @@ virtio_net_ctrl_handle(struct virtio_net *dev)
+ 			break;
+ 
+-		*ctrl_elem.desc_ack = virtio_net_ctrl_handle_req(dev, ctrl_elem.ctrl_req);
++		*ctrl_elem.desc_ack = virtio_net_ctrl_handle_req(dev, ctrl_elem.ctrl_req,
++				ctrl_elem.data_len);
+ 
+ 		ret = virtio_net_ctrl_push(dev, &ctrl_elem);
+-- 
+2.56.0
+

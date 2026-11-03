@@ -1,0 +1,79 @@
+From 5b7e8b87ccfc588f23739d16ee1a6c0a92d911c9 Mon Sep 17 00:00:00 2001
+From: Maxime Coquelin <maxime.coquelin@redhat.com>
+Date: Mon, 14 Sep 2026 13:04:50 +0200
+Subject: [PATCH 12/14] vhost: fix inflight descriptor table overflow
+
+Add bounds checking against inflight table size in split and packed
+ring inflight descriptor APIs. The inflight table is sized from
+queue_size received in VHOST_USER_SET_INFLIGHT_FD, but the guest can
+later resize the virtqueue larger via SET_VRING_NUM. Existing checks
+only validated against vq->size, not the inflight table's desc_num.
+
+A malicious guest could desynchronize these sizes and publish avail
+entries with head indices valid for the enlarged virtqueue but out
+of bounds for the inflight descriptor table, causing heap corruption.
+
+CVE-2026-86565
+Bugzilla ID: 2008
+
+Reported-by: Jia Jia <physicalmtea@gmail.com>
+Acked-by: Kevin Traynor <ktraynor@redhat.com>
+Signed-off-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+---
+ lib/vhost/vhost.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/lib/vhost/vhost.c b/lib/vhost/vhost.c
+index af76adef15..77712a6da2 100644
+--- a/lib/vhost/vhost.c
++++ b/lib/vhost/vhost.c
+@@ -1156,4 +1156,7 @@ rte_vhost_set_inflight_desc_split(int vid, uint16_t vring_idx,
+ 		return -1;
+ 
++	if (unlikely(idx >= vq->inflight_split->desc_num))
++		return -1;
++
+ 	vq->inflight_split->desc[idx].counter = vq->global_counter++;
+ 	vq->inflight_split->desc[idx].inflight = 1;
+@@ -1203,4 +1206,7 @@ rte_vhost_set_inflight_desc_packed(int vid, uint16_t vring_idx,
+ 		return -1;
+ 
++	if (unlikely(old_free_head >= inflight_info->desc_num))
++		return -1;
++
+ 	free_head = old_free_head;
+ 
+@@ -1262,4 +1268,7 @@ rte_vhost_clr_inflight_desc_split(int vid, uint16_t vring_idx,
+ 		return -1;
+ 
++	if (unlikely(idx >= vq->inflight_split->desc_num))
++		return -1;
++
+ 	rte_atomic_thread_fence(rte_memory_order_seq_cst);
+ 
+@@ -1306,4 +1315,7 @@ rte_vhost_clr_inflight_desc_packed(int vid, uint16_t vring_idx,
+ 		return -1;
+ 
++	if (unlikely(head >= inflight_info->desc_num))
++		return -1;
++
+ 	rte_atomic_thread_fence(rte_memory_order_seq_cst);
+ 
+@@ -1390,8 +1402,14 @@ rte_vhost_set_last_inflight_io_packed(int vid, uint16_t vring_idx,
+ 		return -1;
+ 
++	if (unlikely(head >= inflight_info->desc_num))
++		return -1;
++
+ 	last = inflight_info->desc[head].last;
+ 	if (unlikely(last >= vq->size))
+ 		return -1;
+ 
++	if (unlikely(last >= inflight_info->desc_num))
++		return -1;
++
+ 	inflight_info->desc[last].next = inflight_info->free_head;
+ 	inflight_info->free_head = head;
+-- 
+2.56.0
+
