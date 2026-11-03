@@ -1,0 +1,56 @@
+From c98cab19dec3936d5e46b7c70f2428149dc75dc6 Mon Sep 17 00:00:00 2001
+From: Maxime Coquelin <maxime.coquelin@redhat.com>
+Date: Fri, 11 Sep 2026 14:51:51 +0200
+Subject: [PATCH 05/14] vhost: fix log base address mapping offset
+
+Fix out-of-bounds write vulnerability caused by double-application of
+mmap_offset in vhost_user_set_log_base(). The offset was used both as
+a file offset in mmap() and then added again to compute log_base,
+causing log_base to point beyond the mapped memory region.
+
+Map the full region (size + offset) at file offset 0, matching the
+correct pattern used in vhost_user_mmap_region(). Update munmap calls
+to use the actual mapped size.
+
+Fixes: bdd96d8ac76c ("vhost: fix offset while mapping log base address")
+
+Bugzilla ID: 2004
+CVE-2026-86563
+
+Reported-by: Ivar Al-Safawi <hemo40047@gmail.com>
+Acked-by: Kevin Traynor <ktraynor@redhat.com>
+Signed-off-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+---
+ lib/vhost/vhost_user.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/lib/vhost/vhost_user.c b/lib/vhost/vhost_user.c
+index bdb7c4c1e9..10bce04bd6 100644
+--- a/lib/vhost/vhost_user.c
++++ b/lib/vhost/vhost_user.c
+@@ -265,5 +265,6 @@ vhost_backend_cleanup(struct virtio_net *dev)
+ 
+ 	if (dev->log_addr) {
+-		munmap((void *)(uintptr_t)dev->log_addr, dev->log_size);
++		munmap((void *)(uintptr_t)dev->log_addr,
++		       dev->log_size + dev->log_base - dev->log_addr);
+ 		dev->log_addr = 0;
+ 	}
+@@ -2413,5 +2414,5 @@ vhost_user_set_log_base(struct virtio_net **pdev,
+ 	 * fail when offset is not page size aligned.
+ 	 */
+-	addr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, off);
++	addr = mmap(0, size + off, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+ 	alignment = get_blk_size(fd);
+ 	close(fd);
+@@ -2426,5 +2427,6 @@ vhost_user_set_log_base(struct virtio_net **pdev,
+ 	 */
+ 	if (dev->log_addr) {
+-		munmap((void *)(uintptr_t)dev->log_addr, dev->log_size);
++		munmap((void *)(uintptr_t)dev->log_addr,
++		       dev->log_size + dev->log_base - dev->log_addr);
+ 	}
+ 	dev->log_addr = (uint64_t)(uintptr_t)addr;
+-- 
+2.56.0
+
