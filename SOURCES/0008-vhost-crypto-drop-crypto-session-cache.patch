@@ -1,0 +1,78 @@
+From bfde508bb99b5bda719590f3978fcdf744342253 Mon Sep 17 00:00:00 2001
+From: David Marchand <david.marchand@redhat.com>
+Date: Tue, 1 Sep 2026 11:49:30 +0200
+Subject: [PATCH 08/14] vhost/crypto: drop crypto session cache
+
+The session cache may get invalidated by a guest, which would then
+request an operation on the same (cached) session.
+
+In general, the cache itself is racy as there is no guarantee a session
+gets closed on the same thread that is processing a crypto request.
+
+For those reasons, drop the cache entirely.
+
+CVE-2026-86845
+Bugzilla ID: 2028
+Fixes: 939066d96563 ("vhost/crypto: add public function implementation")
+
+Signed-off-by: David Marchand <david.marchand@redhat.com>
+Acked-by: Bruce Richardson <bruce.richardson@intel.com>
+---
+ lib/vhost/vhost_crypto.c | 25 +++++++------------------
+ 1 file changed, 7 insertions(+), 18 deletions(-)
+
+diff --git a/lib/vhost/vhost_crypto.c b/lib/vhost/vhost_crypto.c
+index 6f290dbad1..6a31eeee11 100644
+--- a/lib/vhost/vhost_crypto.c
++++ b/lib/vhost/vhost_crypto.c
+@@ -2,5 +2,5 @@
+  * Copyright(c) 2017-2018 Intel Corporation
+  */
+-#include <rte_malloc.h>
++		#include <rte_malloc.h>
+ #include <rte_hash.h>
+ #include <rte_jhash.h>
+@@ -206,6 +206,4 @@ struct vhost_crypto {
+ 	uint64_t last_session_id;
+ 
+-	uint64_t cache_session_id;
+-	struct rte_cryptodev_sym_session *cache_session;
+ 	/** socket id for the device */
+ 	int socket_id;
+@@ -1228,21 +1226,13 @@ vhost_crypto_process_one_req(struct vhost_crypto *vcrypto,
+ 		session_id = req.header.session_id;
+ 
+-		/* one branch to avoid unnecessary table lookup */
+-		if (vcrypto->cache_session_id != session_id) {
+-			err = rte_hash_lookup_data(vcrypto->session_map,
+-					&session_id, (void **)&session);
+-			if (unlikely(err < 0)) {
+-				err = VIRTIO_CRYPTO_ERR;
+-				VC_LOG_ERR("Failed to find session %"PRIu64,
++		err = rte_hash_lookup_data(vcrypto->session_map,
++				&session_id, (void **)&session);
++		if (unlikely(err < 0)) {
++			err = VIRTIO_CRYPTO_ERR;
++			VC_LOG_ERR("Failed to find session %"PRIu64,
+ 						session_id);
+-				goto error_exit;
+-			}
+-
+-			vcrypto->cache_session = session;
+-			vcrypto->cache_session_id = session_id;
++			goto error_exit;
+ 		}
+ 
+-		session = vcrypto->cache_session;
+-
+ 		err = rte_crypto_op_attach_sym_session(op, session);
+ 		if (unlikely(err < 0)) {
+@@ -1411,5 +1401,4 @@ rte_vhost_crypto_create(int vid, uint8_t cryptodev_id,
+ 	vcrypto->sess_pool = sess_pool;
+ 	vcrypto->cid = cryptodev_id;
+-	vcrypto->cache_session_id = UINT64_MAX;
+ 	vcrypto->last_session_id = 1;
+ 	vcrypto->dev = dev;
+-- 
+2.56.0
+

@@ -1,0 +1,42 @@
+From 149cd102bcdeeefbd26d59778f99c36778b5ca8d Mon Sep 17 00:00:00 2001
+From: David Marchand <david.marchand@redhat.com>
+Date: Mon, 7 Sep 2026 13:41:47 +0200
+Subject: [PATCH 07/14] vhost/crypto: catch incorrect request length
+
+Incorrect lengths expressed as 32 bit unsigned integers in the crypto
+operation request could go unnoticed as those were summed in a too
+narrow 32 bit unsigned integer.
+
+This issue was not fixed by the previous fixes (under CVE-2020-14376
+and CVE-2020-14378).
+
+CVE-2026-86849
+Bugzilla ID: 2022
+Fixes: 3bb595ecd682 ("vhost/crypto: add request handler")
+
+Signed-off-by: David Marchand <david.marchand@redhat.com>
+Acked-by: Bruce Richardson <bruce.richardson@intel.com>
+---
+ lib/vhost/vhost_crypto.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lib/vhost/vhost_crypto.c b/lib/vhost/vhost_crypto.c
+index caeff19271..6f290dbad1 100644
+--- a/lib/vhost/vhost_crypto.c
++++ b/lib/vhost/vhost_crypto.c
+@@ -929,9 +929,9 @@ vhost_crypto_check_chain_request(struct virtio_crypto_alg_chain_data_req *req)
+ 			VHOST_CRYPTO_MAX_DATA_SIZE) &&
+ 		(req->para.len_to_hash <= VHOST_CRYPTO_MAX_DATA_SIZE) &&
+-		(req->para.cipher_start_src_offset + req->para.len_to_cipher <=
++		((uint64_t)req->para.cipher_start_src_offset + req->para.len_to_cipher <=
+ 			req->para.src_data_len) &&
+-		(req->para.hash_start_src_offset + req->para.len_to_hash <=
++		((uint64_t)req->para.hash_start_src_offset + req->para.len_to_hash <=
+ 			req->para.src_data_len) &&
+-		(req->para.dst_data_len + req->para.hash_result_len <=
++		((uint64_t)req->para.dst_data_len + req->para.hash_result_len <=
+ 			VHOST_CRYPTO_MAX_DATA_SIZE)))
+ 		return VIRTIO_CRYPTO_OK;
+-- 
+2.56.0
+

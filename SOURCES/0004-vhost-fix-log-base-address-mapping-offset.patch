@@ -1,0 +1,48 @@
+From 14a628de8d7e63f05ba563cda98431e749ff9f75 Mon Sep 17 00:00:00 2001
+From: Maxime Coquelin <maxime.coquelin@redhat.com>
+Date: Fri, 11 Sep 2026 14:51:51 +0200
+Subject: [PATCH 04/14] vhost: fix log base address mapping offset
+
+Fix out-of-bounds write vulnerability caused by double-application of
+mmap_offset in vhost_user_set_log_base(). The offset was used both as
+a file offset in mmap() and then added again to compute log_base,
+causing log_base to point beyond the mapped memory region.
+
+Map the full region (size + offset) at file offset 0, matching the
+correct pattern used in vhost_user_mmap_region(). Update munmap calls
+to use the actual mapped size.
+
+CVE-2026-86563
+Bugzilla ID: 2004
+Fixes: 6e3cb080ec7c ("vhost: fix offset while mapping log base address")
+
+Reported-by: Ivar Al-Safawi <hemo40047@gmail.com>
+Signed-off-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+Acked-by: Kevin Traynor <ktraynor@redhat.com>
+---
+ lib/vhost/vhost_user.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/lib/vhost/vhost_user.c b/lib/vhost/vhost_user.c
+index 55249fe5a7..cbf383acb8 100644
+--- a/lib/vhost/vhost_user.c
++++ b/lib/vhost/vhost_user.c
+@@ -207,5 +207,6 @@ vhost_backend_cleanup(struct virtio_net *dev)
+ 
+ 	if (dev->log_addr) {
+-		munmap((void *)(uintptr_t)dev->log_addr, dev->log_size);
++		munmap((void *)(uintptr_t)dev->log_addr,
++		       dev->log_size + dev->log_base - dev->log_addr);
+ 		dev->log_addr = 0;
+ 	}
+@@ -2353,5 +2354,6 @@ vhost_user_set_log_base(struct virtio_net **pdev,
+ 	 */
+ 	if (dev->log_addr) {
+-		munmap((void *)(uintptr_t)dev->log_addr, dev->log_size);
++		munmap((void *)(uintptr_t)dev->log_addr,
++		       dev->log_size + dev->log_base - dev->log_addr);
+ 	}
+ 	dev->log_addr = (uint64_t)(uintptr_t)addr;
+-- 
+2.56.0
+

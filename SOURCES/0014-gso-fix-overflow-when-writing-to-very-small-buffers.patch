@@ -1,0 +1,122 @@
+From b8ed23339c22ccb8ef4ca2fbbe84d6f3f6bc7b32 Mon Sep 17 00:00:00 2001
+From: Bruce Richardson <bruce.richardson@intel.com>
+Date: Mon, 21 Sep 2026 11:19:11 +0100
+Subject: [PATCH 14/14] gso: fix overflow when writing to very small buffers
+
+The gso library never checks that the buffers used for the packet
+headers are actually big enough to handle those headers, leading to a
+memcpy overflow if the allocated mbuf size is too small. Add some
+appropriate checks.
+
+CVE-2026-100236
+Bugzilla ID: 2047
+Fixes: 119583797b6a ("gso: support TCP/IPv4 GSO")
+
+Reported-by: Alexandru-Ionut Jipa <jipaionut@gmail.com>
+Signed-off-by: Bruce Richardson <bruce.richardson@intel.com>
+Acked-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+---
+ .mailmap                  |  1 +
+ lib/gso/gso_common.c      | 12 ++++++++++++
+ lib/gso/gso_tcp4.c        |  5 ++---
+ lib/gso/gso_tunnel_tcp4.c |  6 +++---
+ lib/gso/gso_tunnel_udp4.c |  4 ++--
+ lib/gso/gso_udp4.c        |  5 ++---
+ 6 files changed, 22 insertions(+), 11 deletions(-)
+
+diff --git a/.mailmap b/.mailmap
+index f23d0d9148..e2083be126 100644
+--- a/.mailmap
++++ b/.mailmap
+@@ -52,4 +52,5 @@ Alexander Solganik <solganik@gmail.com>
+ Alexander V Gutkin <alexander.v.gutkin@intel.com>
+ Alexandre Ferrieux <alexandre.ferrieux@orange.com>
++Alexandru-Ionut Jipa <jipaionut@gmail.com>
+ Alexey Kardashevskiy <aik@ozlabs.ru>
+ Alex Kiselev <alex@bisonrouter.com> <alex@therouter.net>
+diff --git a/lib/gso/gso_common.c b/lib/gso/gso_common.c
+index 378bf2c6aa..481c3b3beb 100644
+--- a/lib/gso/gso_common.c
++++ b/lib/gso/gso_common.c
+@@ -51,6 +51,18 @@ gso_do_segment(struct rte_mbuf *pkt,
+ 	uint16_t pkt_in_data_pos, segment_bytes_remaining;
+ 	uint16_t pyld_len, nb_segs;
++	uint16_t direct_buf_size, direct_tailroom;
+ 	bool more_in_pkt, more_out_segs;
+ 
++	/*
++	 * The header must be fully contained in pkt's first segment and must fit
++	 * in a freshly allocated direct_pool mbuf.
++	 */
++	direct_buf_size = rte_pktmbuf_data_room_size(direct_pool);
++	if (unlikely(direct_buf_size <= (uint16_t)RTE_PKTMBUF_HEADROOM))
++		return -EINVAL;
++	direct_tailroom = direct_buf_size - RTE_PKTMBUF_HEADROOM;
++	if (unlikely(pkt_hdr_offset > pkt->data_len || pkt_hdr_offset > direct_tailroom))
++		return -EINVAL;
++
+ 	pkt_in = pkt;
+ 	nb_segs = 0;
+diff --git a/lib/gso/gso_tcp4.c b/lib/gso/gso_tcp4.c
+index d31feaff95..1dea397e89 100644
+--- a/lib/gso/gso_tcp4.c
++++ b/lib/gso/gso_tcp4.c
+@@ -54,9 +54,8 @@ gso_tcp4_segment(struct rte_mbuf *pkt,
+ 	}
+ 
+-	/* Don't process the packet without data */
++	/* Don't process the packet without data or hdr larger than seg size */
+ 	hdr_offset = pkt->l2_len + pkt->l3_len + pkt->l4_len;
+-	if (unlikely(hdr_offset >= pkt->pkt_len)) {
++	if (unlikely(hdr_offset >= pkt->pkt_len || hdr_offset >= gso_size))
+ 		return 0;
+-	}
+ 
+ 	pyld_unit_size = gso_size - hdr_offset;
+diff --git a/lib/gso/gso_tunnel_tcp4.c b/lib/gso/gso_tunnel_tcp4.c
+index 1a7ef30dde..adb0df7416 100644
+--- a/lib/gso/gso_tunnel_tcp4.c
++++ b/lib/gso/gso_tunnel_tcp4.c
+@@ -78,8 +78,8 @@ gso_tunnel_tcp4_segment(struct rte_mbuf *pkt,
+ 
+ 	hdr_offset += pkt->l3_len + pkt->l4_len;
+-	/* Don't process the packet without data */
+-	if (hdr_offset >= pkt->pkt_len) {
++	/* Don't process the packet without data or hdr larger than seg size */
++	if (hdr_offset >= pkt->pkt_len || hdr_offset >= gso_size)
+ 		return 0;
+-	}
++
+ 	pyld_unit_size = gso_size - hdr_offset;
+ 
+diff --git a/lib/gso/gso_tunnel_udp4.c b/lib/gso/gso_tunnel_udp4.c
+index 1fc7a8dbc5..b90b9ae954 100644
+--- a/lib/gso/gso_tunnel_udp4.c
++++ b/lib/gso/gso_tunnel_udp4.c
+@@ -79,6 +79,6 @@ gso_tunnel_udp4_segment(struct rte_mbuf *pkt,
+ 
+ 	hdr_offset += pkt->l3_len;
+-	/* Don't process the packet without data */
+-	if ((hdr_offset + pkt->l4_len) >= pkt->pkt_len)
++	/* Don't process the packet without data or hdrs larger than seg size */
++	if ((hdr_offset + pkt->l4_len) >= pkt->pkt_len || hdr_offset >= gso_size)
+ 		return 0;
+ 
+diff --git a/lib/gso/gso_udp4.c b/lib/gso/gso_udp4.c
+index 5d0186aa24..e2ec84759d 100644
+--- a/lib/gso/gso_udp4.c
++++ b/lib/gso/gso_udp4.c
+@@ -63,8 +63,7 @@ gso_udp4_segment(struct rte_mbuf *pkt,
+ 	hdr_offset = pkt->l2_len + pkt->l3_len;
+ 
+-	/* Don't process the packet without data. */
+-	if (unlikely(hdr_offset + pkt->l4_len >= pkt->pkt_len)) {
++	/* Don't process the packet without data or header larger than seg size. */
++	if (unlikely(hdr_offset + pkt->l4_len >= pkt->pkt_len || hdr_offset >= gso_size))
+ 		return 0;
+-	}
+ 
+ 	/* pyld_unit_size must be a multiple of 8 because frag_off
+-- 
+2.56.0
+

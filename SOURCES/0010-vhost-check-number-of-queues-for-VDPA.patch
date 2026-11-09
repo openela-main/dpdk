@@ -1,0 +1,52 @@
+From a58a36daf2ca932a94a267f8f6703469e9fa48be Mon Sep 17 00:00:00 2001
+From: David Marchand <david.marchand@redhat.com>
+Date: Thu, 27 Aug 2026 13:41:04 +0200
+Subject: [PATCH 10/14] vhost: check number of queues for VDPA
+
+The vhost library was not enforcing any limit on the number of queue a
+guest could allocate, which could result in out of bound accesses in the
+driver or other nasty bugs.
+
+CVE-2026-86856
+Bugzilla ID: 2027
+
+Fixes: 10421b0d9075 ("vdpa/nfp: add interrupt logic of vring relay")
+Cc: stable@dpdk.org
+
+Acked-by: Kevin Traynor <ktraynor@redhat.com>
+Signed-off-by: David Marchand <david.marchand@redhat.com>
+---
+ lib/vhost/vhost_user.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/lib/vhost/vhost_user.c b/lib/vhost/vhost_user.c
+index 4505381cc4..cf216c89c8 100644
+--- a/lib/vhost/vhost_user.c
++++ b/lib/vhost/vhost_user.c
+@@ -2931,6 +2931,7 @@ vhost_user_check_and_alloc_queue_pair(struct virtio_net *dev,
+ 			struct vhu_msg_context *ctx)
+ {
+ 	uint32_t vring_idx;
++	uint32_t queue_num;
+ 
+ 	switch (ctx->msg.request.frontend) {
+ 	case VHOST_USER_SET_VRING_KICK:
+@@ -2954,8 +2955,13 @@ vhost_user_check_and_alloc_queue_pair(struct virtio_net *dev,
+ 		return 0;
+ 	}
+ 
+-	if (vring_idx >= VHOST_MAX_VRING) {
+-		VHOST_LOG_CONFIG(dev->ifname, ERR, "invalid vring index: %u\n", vring_idx);
++	if (rte_vhost_driver_get_queue_num(dev->ifname, &queue_num) < 0) {
++		VHOST_LOG_CONFIG(dev->ifname, ERR, "failed to get queue num");
++		return -1;
++	}
++
++	if (vring_idx >= queue_num * 2) {
++		VHOST_LOG_CONFIG(dev->ifname, ERR, "invalid vring index: %u", vring_idx);
+ 		return -1;
+ 	}
+ 
+-- 
+2.56.0
+

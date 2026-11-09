@@ -1,0 +1,145 @@
+From 8dd6d8d35e58d3ab85346d56b367a91264d36139 Mon Sep 17 00:00:00 2001
+From: Maxime Coquelin <maxime.coquelin@redhat.com>
+Date: Thu, 17 Sep 2026 11:11:43 +0200
+Subject: [PATCH 13/14] vhost: fix indirect descriptor table double fetch
+
+The virtio descriptor length field was read multiple times from
+guest-controlled memory, creating a TOCTOU (time-of-check-time-of-use)
+vulnerability. A malicious guest could exploit this by modifying
+desc->len between reads, causing the host to allocate a buffer of
+one size but iterate over a different number of descriptors, leading
+to an out-of-bounds read.
+
+Affected functions:
+- fill_vec_buf_packed_indirect(): desc->len read for allocation at
+  one point, then re-read for loop bound calculation
+- fill_vec_buf_split(): vq->desc[idx].len re-read for allocation
+  after being captured in a local variable
+- vdpa.c indirect descriptor handling: same pattern
+
+Fix by capturing the descriptor length once in a local variable
+and using that for all subsequent operations.
+
+Also fix a memory leak in fill_vec_buf_packed_indirect() where
+free_ind_table() was not called on the map_one_desc() error path.
+
+CVE-2026-93683
+Bugzilla ID: 2046
+Fixes: d0c24508e1f ("vhost: add support for non-contiguous indirect descs tables")
+Fixes: 2f3225a7d69 ("vhost: add vector filling support for packed ring")
+
+Reported-by: Naseeb Dangi <naseebdangi100@gmail.com>
+Signed-off-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+Acked-by: Kevin Traynor <ktraynor@redhat.com>
+---
+ .mailmap               |  1 +
+ lib/vhost/vdpa.c       |  8 +++++---
+ lib/vhost/virtio_net.c | 22 +++++++++++++---------
+ 3 files changed, 19 insertions(+), 12 deletions(-)
+
+diff --git a/.mailmap b/.mailmap
+index b372ef1eba..f23d0d9148 100644
+--- a/.mailmap
++++ b/.mailmap
+@@ -999,4 +999,5 @@ Narcisa Vasile <navasile@linux.microsoft.com> <navasile@microsoft.com> <narcisa.
+ Narender Vangati <narender.vangati@intel.com>
+ Naresh Kumar PBS <nareshkumar.pbs@broadcom.com>
++Naseeb Dangi <naseebdangi100@gmail.com>
+ Natalie Samsonov <nsamsono@marvell.com>
+ Natanael Copa <ncopa@alpinelinux.org>
+diff --git a/lib/vhost/vdpa.c b/lib/vhost/vdpa.c
+index 219eef879c..aaa3da6da8 100644
+--- a/lib/vhost/vdpa.c
++++ b/lib/vhost/vdpa.c
+@@ -189,5 +189,7 @@ rte_vdpa_relay_vring_used(int vid, uint16_t qid, void *vring_m)
+ 
+ 		if (vq->desc[desc_id].flags & VRING_DESC_F_INDIRECT) {
+-			dlen = vq->desc[desc_id].len;
++			uint64_t desc_len = vq->desc[desc_id].len;
++
++			dlen = desc_len;
+ 			nr_descs = dlen / sizeof(struct vring_desc);
+ 			if (unlikely(nr_descs > vq->size))
+@@ -201,8 +203,8 @@ rte_vdpa_relay_vring_used(int vid, uint16_t qid, void *vring_m)
+ 				return -1;
+ 
+-			if (unlikely(dlen < vq->desc[desc_id].len)) {
++			if (unlikely(dlen < desc_len)) {
+ 				idesc = vhost_alloc_copy_ind_table(dev, vq,
+ 						vq->desc[desc_id].addr,
+-						vq->desc[desc_id].len);
++						desc_len);
+ 				if (unlikely(!idesc))
+ 					return -1;
+diff --git a/lib/vhost/virtio_net.c b/lib/vhost/virtio_net.c
+index d78d39d292..7533d57465 100644
+--- a/lib/vhost/virtio_net.c
++++ b/lib/vhost/virtio_net.c
+@@ -787,5 +787,7 @@ fill_vec_buf_split(struct virtio_net *dev, struct vhost_virtqueue *vq,
+ 
+ 	if (vq->desc[idx].flags & VRING_DESC_F_INDIRECT) {
+-		dlen = vq->desc[idx].len;
++		uint64_t desc_len = vq->desc[idx].len;
++
++		dlen = desc_len;
+ 		nr_descs = dlen / sizeof(struct vring_desc);
+ 		if (unlikely(nr_descs > vq->size))
+@@ -799,5 +801,5 @@ fill_vec_buf_split(struct virtio_net *dev, struct vhost_virtqueue *vq,
+ 			return -1;
+ 
+-		if (unlikely(dlen < vq->desc[idx].len)) {
++		if (unlikely(dlen < desc_len)) {
+ 			/*
+ 			 * The indirect desc table is not contiguous
+@@ -805,5 +807,5 @@ fill_vec_buf_split(struct virtio_net *dev, struct vhost_virtqueue *vq,
+ 			 */
+ 			idesc = vhost_alloc_copy_ind_table(dev, vq,
+-					vq->desc[idx].addr, vq->desc[idx].len);
++					vq->desc[idx].addr, desc_len);
+ 			if (unlikely(!idesc))
+ 				return -1;
+@@ -910,8 +912,8 @@ fill_vec_buf_packed_indirect(struct virtio_net *dev,
+ 	uint32_t nr_descs;
+ 	uint16_t vec_id = *vec_idx;
+-	uint64_t dlen;
++	uint64_t desc_len = desc->len;
++	uint64_t dlen = desc_len;
+ 	struct vring_packed_desc *descs, *idescs = NULL;
+ 
+-	dlen = desc->len;
+ 	descs = (struct vring_packed_desc *)(uintptr_t)
+ 		vhost_iova_to_vva(dev, vq, desc->addr, &dlen, VHOST_ACCESS_RO);
+@@ -919,5 +921,5 @@ fill_vec_buf_packed_indirect(struct virtio_net *dev,
+ 		return -1;
+ 
+-	if (unlikely(dlen < desc->len)) {
++	if (unlikely(dlen < desc_len)) {
+ 		/*
+ 		 * The indirect desc table is not contiguous
+@@ -925,5 +927,5 @@ fill_vec_buf_packed_indirect(struct virtio_net *dev,
+ 		 */
+ 		idescs = vhost_alloc_copy_ind_table(dev,
+-				vq, desc->addr, desc->len);
++				vq, desc->addr, desc_len);
+ 		if (unlikely(!idescs))
+ 			return -1;
+@@ -932,5 +934,5 @@ fill_vec_buf_packed_indirect(struct virtio_net *dev,
+ 	}
+ 
+-	nr_descs =  desc->len / sizeof(struct vring_packed_desc);
++	nr_descs = desc_len / sizeof(struct vring_packed_desc);
+ 	if (unlikely(nr_descs >= vq->size)) {
+ 		free_ind_table(idescs);
+@@ -948,6 +950,8 @@ fill_vec_buf_packed_indirect(struct virtio_net *dev,
+ 		if (unlikely(map_one_desc(dev, vq, buf_vec, &vec_id,
+ 						descs[i].addr, dlen,
+-						perm)))
++						perm))) {
++			free_ind_table(idescs);
+ 			return -1;
++		}
+ 	}
+ 	*vec_idx = vec_id;
+-- 
+2.56.0
+

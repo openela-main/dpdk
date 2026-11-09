@@ -1,0 +1,53 @@
+From c74a65ae4c5ef3ee9d0c97d90e20baa502c4799d Mon Sep 17 00:00:00 2001
+From: Maxime Coquelin <maxime.coquelin@redhat.com>
+Date: Tue, 8 Sep 2026 16:42:54 +0200
+Subject: [PATCH 02/14] vhost: fix missing memory size validation before mmap
+
+A malicious guest could send a VHOST_USER_SET_MEM_TABLE message with
+a memory_size larger than the actual backing file size. The mmap()
+call would succeed, but subsequent access to addresses beyond the
+real file size would cause SIGBUS, crashing the DPDK host process.
+
+Add validation to check that mmap_size does not exceed the backing
+file's st_size before calling mmap().
+
+CVE-2026-86561
+Bugzilla ID: 2002
+
+Signed-off-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+Acked-by: Kevin Traynor <ktraynor@redhat.com>
+---
+ lib/vhost/vhost_user.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/lib/vhost/vhost_user.c b/lib/vhost/vhost_user.c
+index e36312181a..55249fe5a7 100644
+--- a/lib/vhost/vhost_user.c
++++ b/lib/vhost/vhost_user.c
+@@ -1224,4 +1224,5 @@ vhost_user_mmap_region(struct virtio_net *dev,
+ 	uint64_t mmap_size;
+ 	uint64_t alignment;
++	struct stat file_stat;
+ 	int populate;
+ 
+@@ -1263,4 +1264,17 @@ vhost_user_mmap_region(struct virtio_net *dev,
+ 	}
+ 
++	/* Validate mmap_size does not exceed backing file size */
++	if (fstat(region->fd, &file_stat) == -1) {
++		VHOST_LOG_CONFIG(dev->ifname, ERR,
++			"failed to get backing file size: %s", strerror(errno));
++		return -1;
++	}
++	if (mmap_size > (uint64_t)file_stat.st_size) {
++		VHOST_LOG_CONFIG(dev->ifname, ERR,
++			"mmap size (0x%" PRIx64 ") exceeds backing file size (0x%" PRIx64 ")",
++			mmap_size, (uint64_t)file_stat.st_size);
++		return -1;
++	}
++
+ 	populate = dev->async_copy ? MAP_POPULATE : 0;
+ 	mmap_addr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE,
+-- 
+2.56.0
+
